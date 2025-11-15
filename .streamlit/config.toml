@@ -1,0 +1,4 @@
+# .streamlit/config.toml
+[general]
+ 
+python_version = 3.9
