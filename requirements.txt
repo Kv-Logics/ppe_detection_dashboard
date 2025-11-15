@@ -1,9 +1,9 @@
 streamlit
-opencv-python-headless
 pandas
-numpy
-plotly
-ultralytics
-torch
-torchvision
+numpy 
+plotly 
+torch==2.3.0
+torchvision==0.18.0 
+ultralytics==8.2.14
+# Image handling
 pillow
