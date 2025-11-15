@@ -1,9 +1,12 @@
-streamlit
-pandas
-numpy 
-plotly 
-torch==2.3.0
-torchvision==0.18.0 
-ultralytics==8.2.14
-# Image handling
-pillow
+
+# requirements.txt
+streamlit==1.30.0
+opencv-python-headless==4.8.1.78
+numpy==1.26.3
+pandas==2.1.4
+plotly==5.18.0
+ultralytics==8.0.20
+# Note: PyTorch is a hidden dependency of ultralytics, but it's best to include it
+torch==2.1.2
+torchvision==0.16.2
+pillow==10.1.0
