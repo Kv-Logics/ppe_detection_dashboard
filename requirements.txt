@@ -1,9 +1,12 @@
+# requirements.txt
 streamlit==1.30.0
 opencv-python-headless==4.8.1.78
 numpy==1.26.3
 pandas==2.1.4
 plotly==5.18.0
+# -- Pinned Versions for Python 3.10 Stability --
 ultralytics==8.0.20
-torch==2.1.2
-torchvision==0.16.2
+torch==2.0.1
+torchvision==0.15.2
+# ------------------------------------------------
 pillow==10.1.0
