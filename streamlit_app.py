@@ -43,6 +43,8 @@ if 'run_webcam' not in st.session_state:
     st.session_state.run_webcam = False
 if 'all_detections' not in st.session_state:
     st.session_state.all_detections = []
+if 'all_frames' not in st.session_state:
+    st.session_state.all_frames = 0 # Track total frames for compliance calculation
 
 # Load YOLOv8 model
 @st.cache_resource
@@ -61,14 +63,34 @@ def load_model(model_path='best.pt'):
         st.error(f"Model loading error: {e}")
         return None
 
-# PPE Detection and Rule Engine
-def detect_ppe_violations(frame, model, frame_num):
-    """Run YOLOv8 detection and apply rule engine for violations"""
-    results = model(frame, conf=0.5)
+# PPE Detection and Rule Engine (Updated for Live Feed: conf_threshold and Timestamp Overlay)
+def detect_ppe_violations(frame, model, frame_num, conf_threshold):
+    """
+    Run YOLOv8 detection and apply rule engine for violations
+    
+    Args:
+        frame: The current image frame.
+        model: The loaded YOLO model.
+        frame_num: The sequence number of the frame.
+        conf_threshold: The minimum confidence for detections and violations.
+    """
+    # Use the passed threshold for running the model
+    results = model(frame, conf=conf_threshold) 
     
     violations = []
     detections = []
     
+    # Add Timestamp Overlay (Live Video Feed Module Requirement)
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cv2.putText(frame, 
+                timestamp, 
+                (10, 30), # Position
+                cv2.FONT_HERSHEY_SIMPLEX, 
+                1, # Font scale
+                (255, 255, 255), # White color
+                2, # Thickness
+                cv2.LINE_AA)
+
     for result in results:
         boxes = result.boxes
         for box in boxes:
@@ -77,25 +99,30 @@ def detect_ppe_violations(frame, model, frame_num):
             class_name = model.names[cls_id]
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             
-            detections.append({
-                'class': class_name,
-                'confidence': conf,
-                'bbox': [x1, y1, x2, y2]
-            })
-            
-            # Rule Engine: Check for violations
-            if 'NO-' in class_name or 'NoVest' in class_name or 'NoHardhat' in class_name or 'NoMask' in class_name:
-                severity = 'High' if class_name in ['NO-Hardhat', 'NO-Mask', 'NoHardhat', 'NoMask'] else 'Medium'
-                violation = {
-                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'frame_num': frame_num,
-                    'violation_type': class_name,
-                    'confidence': round(conf, 4),
-                    'severity': severity,
-                    'status': 'Unresolved'
-                }
-                violations.append(violation)
+            # Only consider detections above the threshold
+            if conf >= conf_threshold:
+                detections.append({
+                    'class': class_name,
+                    'confidence': conf,
+                    'bbox': [x1, y1, x2, y2]
+                })
+                
+                # Rule Engine: Check for violations
+                if 'NO-' in class_name or 'NoVest' in class_name or 'NoHardhat' in class_name or 'NoMask' in class_name:
+                    severity = 'High' if class_name in ['NO-Hardhat', 'NO-Mask', 'NoHardhat', 'NoMask'] else 'Medium'
+                    violation = {
+                        'timestamp': timestamp, # Use the generated timestamp
+                        'frame_num': frame_num,
+                        'violation_type': class_name,
+                        'confidence': round(conf, 4),
+                        'severity': severity,
+                        'status': 'Unresolved'
+                    }
+                    violations.append(violation)
     
+    # Use results[0].plot() which already includes bounding boxes and labels
+    # We use the original frame with the timestamp for the plot function input
+    # to ensure the timestamp is present, then overwrite with the annotated frame.
     return detections, violations, results[0].plot()
 
 # Main dashboard
@@ -151,7 +178,8 @@ if mode == "📹 Process Video":
             # Processing settings
             st.subheader("⚙️ Processing Settings")
             process_every_n = st.slider("Process every N frames", 1, 10, 5, help="Higher = faster but less accurate")
-            conf_threshold = st.slider("Confidence Threshold", 0.3, 0.9, 0.5, 0.05)
+            # Use a unified threshold for video processing
+            conf_threshold = st.slider("Confidence Threshold (Detection & Logging)", 0.3, 0.9, 0.5, 0.05)
             save_output = st.checkbox("Save processed video", value=True)
             
             if st.button("🚀 Start Processing", type="primary", use_container_width=True):
@@ -163,6 +191,7 @@ if mode == "📹 Process Video":
                 st.session_state.processed_results = []
                 st.session_state.violation_logs = []
                 st.session_state.all_detections = []
+                st.session_state.all_frames = 0 # Reset frame count
                 detection_counts = {}
                 
                 # Process video
@@ -194,8 +223,8 @@ if mode == "📹 Process Video":
                     if frame_count % process_every_n == 0:
                         processed_count += 1
                         
-                        # Run detection
-                        detections, violations, annotated_frame = detect_ppe_violations(frame, model, frame_count)
+                        # Run detection (using the slider threshold)
+                        detections, violations, annotated_frame = detect_ppe_violations(frame, model, frame_count, conf_threshold)
                         
                         # Store all detections for confidence calculation
                         st.session_state.all_detections.extend(detections)
@@ -234,6 +263,7 @@ if mode == "📹 Process Video":
                     out.release()
                 
                 st.session_state.detection_stats = detection_counts
+                st.session_state.all_frames = processed_count # Store actual processed frame count
                 
                 progress_bar.progress(1.0)
                 status_text.text(f"✅ Complete! Processed {frame_count} frames.")
@@ -296,7 +326,7 @@ if mode == "📹 Process Video":
                 st.plotly_chart(fig, use_container_width=True)
 
 # ============================================================
-# MODE 2: WEBCAM LIVE FEED
+# MODE 2: WEBCAM LIVE FEED (Updated with Controls and Timestamp)
 # ============================================================
 elif mode == "📷 Webcam (Live Feed)":
     st.header("📷 Live Webcam Feed")
@@ -310,8 +340,31 @@ elif mode == "📷 Webcam (Live Feed)":
             st.session_state.run_webcam = not st.session_state.run_webcam
         
         FRAME_WINDOW = st.empty()
-    
+        
+    # --- New Control Panel for Live Feed ---
     with col2:
+        st.subheader("Live Controls")
+        # Confidence Threshold Adjustment (Live Video Feed Module Requirement)
+        live_conf_threshold = st.slider(
+            "Detection Confidence Threshold", 
+            min_value=0.3, 
+            max_value=0.9, 
+            value=0.5, 
+            step=0.05,
+            help="Minimum confidence for drawing boxes and logging violations."
+        )
+        
+        # Frame Skip Toggle (Proxy for optimization control)
+        frame_skip = st.slider(
+            "Processing Skip Factor (Optimization)", 
+            min_value=1, 
+            max_value=5, 
+            value=3, 
+            step=1,
+            help="Process every Nth frame (higher = smoother stream, less frequent detection)."
+        )
+        
+        st.markdown("---")
         stats_placeholder = st.empty()
         violations_placeholder = st.empty()
     
@@ -334,18 +387,18 @@ elif mode == "📷 Webcam (Live Feed)":
                 
                 frame_count += 1
                 
-                # Process every 3rd frame for performance
-                if frame_count % 3 == 0:
-                    # Run detection
+                # Process based on the frame_skip control
+                if frame_count % frame_skip == 0: 
+                    # Run detection with adjustable confidence
                     detections, violations, annotated_frame = detect_ppe_violations(
-                        frame, model, frame_count
+                        frame, model, frame_count, live_conf_threshold # Pass threshold
                     )
                     
                     detection_history.extend(detections)
                     violation_history.extend(violations)
                     
                     # Display annotated frame
-                    FRAME_WINDOW.image(annotated_frame, channels="BGR", use_column_width=True)
+                    FRAME_WINDOW.image(annotated_frame, channels="BGR", use_column_width=True) 
                     
                     # Display live stats
                     with stats_placeholder.container():
@@ -370,7 +423,7 @@ elif mode == "📷 Webcam (Live Feed)":
         st.info("Click 'Start Webcam' to begin live detection")
 
 # ============================================================
-# MODE 3: VIEW STATISTICS
+# MODE 3: VIEW STATISTICS (Updated with Compliance Charts)
 # ============================================================
 elif mode == "📊 View Statistics":
     st.header("📊 Detection Statistics")
@@ -378,7 +431,7 @@ elif mode == "📊 View Statistics":
     # Check if we have processed data
     if st.session_state.processed_results:
         # Metrics
-        total_frames = len(st.session_state.processed_results)
+        total_frames = st.session_state.all_frames # Use actual frames processed
         total_detections = sum([r['detections'] for r in st.session_state.processed_results])
         total_violations = len(st.session_state.violation_logs)
         
@@ -386,14 +439,75 @@ elif mode == "📊 View Statistics":
         avg_confidence = 0
         if st.session_state.all_detections:
             avg_confidence = sum([d['confidence'] for d in st.session_state.all_detections]) / len(st.session_state.all_detections)
-        
+            
+        # 1. Compliance Percentage (Compliance Stats Module Requirement)
+        # Compliance % = (1 - (Total Violations / Total Detections)) * 100
+        compliance_percent = 0
+        if total_detections > 0:
+            violation_rate = total_violations / total_detections
+            compliance_percent = (1 - violation_rate) * 100
+            
+        # KPI Summary Cards 
+        st.subheader("KPI Summary")
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total Frames", total_frames)
         col2.metric("Total Detections", total_detections)
-        col3.metric("Violations Detected", total_violations)
-        col4.metric("Avg Confidence", f"{avg_confidence*100:.2f}%")
+        col3.metric("Violations Detected", total_violations, delta=f"{total_violations} total")
+        col4.metric("Compliance Rate", f"{compliance_percent:.2f}%", delta_color="inverse")
         
-        # Charts
+        st.metric("🎯 Average Confidence", f"{avg_confidence*100:.2f}%")
+
+        # 2. Compliance Percentage Chart (Compliance Stats Module Requirement)
+        st.subheader("Compliance Overview")
+        if total_detections > 0:
+            fig_gauge = go.Figure(go.Indicator(
+                mode = "gauge+number",
+                value = compliance_percent,
+                domain = {'x': [0, 1], 'y': [0, 1]},
+                title = {'text': "PPE Compliance %"},
+                gauge = {
+                    'axis': {'range': [None, 100]},
+                    'bar': {'color': "#667eea"},
+                    'steps': [
+                        {'range': [0, 70], 'color': "red"},
+                        {'range': [70, 90], 'color': "yellow"},
+                        {'range': [90, 100], 'color': "green"}],
+                    'threshold': {
+                        'line': {'color': "red", 'width': 4},
+                        'thickness': 0.75,
+                        'value': compliance_percent}
+                }
+            ))
+            fig_gauge.update_layout(paper_bgcolor='rgba(0,0,0,0)', font=dict(color='white'))
+            st.plotly_chart(fig_gauge, use_container_width=True)
+            
+        # 3. Violations Over Time Chart (Compliance Stats Module Requirement)
+        st.subheader("Violations Trend Over Frame Number")
+        if st.session_state.violation_logs:
+            df_logs = pd.DataFrame(st.session_state.violation_logs)
+            # Group by frame_num and count violations
+            violations_per_frame = df_logs.groupby('frame_num').size().reset_index(name='Count')
+            
+            fig_time = px.line(
+                violations_per_frame,
+                x='frame_num',
+                y='Count',
+                title='Violations Over Frame Number',
+                labels={'frame_num': 'Frame Number', 'Count': 'Number of Violations'},
+                line_shape='spline',
+                color_discrete_sequence=['#ff4b4b'] # Streamlit Red
+            )
+            fig_time.update_layout(
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                font=dict(color='white'),
+                xaxis_title="Frame Number (Time Proxy)",
+                yaxis_title="Violation Count"
+            )
+            st.plotly_chart(fig_time, use_container_width=True)
+            
+        
+        # Detection Distribution (Existing Pie Chart)
         st.subheader("Detection Distribution")
         
         if st.session_state.detection_stats:
@@ -433,7 +547,7 @@ if st.session_state.violation_logs:
     # Display dataframe
     st.dataframe(df, use_container_width=True, height=400)
     
-    # Summary by type
+    # Summary by type (Existing Bar Chart)
     st.subheader("📊 Violations Summary")
     violation_counts = df['violation_type'].value_counts()
     

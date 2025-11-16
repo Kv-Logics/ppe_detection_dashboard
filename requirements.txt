@@ -1,11 +1,15 @@
-# requirements.txt
+# Core Dashboard and Data Handling
 streamlit==1.30.0
-opencv-python-headless==4.8.1.78
-numpy==1.26.3
 pandas==2.1.4
+numpy==1.26.3
 plotly==5.18.0
-# -- FORCE LATEST STABLE ULTRALYTICS (Recommended fix for this error) --
-ultralytics==8.2.14 
+pillow==10.1.0
+
+# Computer Vision and Deep Learning Engine (YOLOv8)
+# Pinned to a recent, stable version to fix the 'nn.modules.conv' error
+ultralytics==8.2.14
 torch==2.1.2
 torchvision==0.16.2
-pillow==10.1.0
+
+# Video Processing (Headless for cloud deployment)
+opencv-python-headless==4.8.1.78
